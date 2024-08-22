@@ -3,9 +3,9 @@ import { JwtPayload } from "jsonwebtoken";
 import { v4 } from "uuid";
 import UserDto from "../dtos/user.dto";
 import ApiError from "../exceptions/api.error";
-import User from "../models/user.model";
 import mailService from "./mail.service";
 import tokenService from "./token.service";
+import userService from "./user.service";
 
 type Payload = {
   email: string;
@@ -24,23 +24,21 @@ type LoginResponse = {
 
 class AuthService {
   async registration({ email, password }: Payload): Promise<void | Error> {
-    const isUserExist = await User.findOne({ email });
+    const isUserExist = await userService.fetchUser({ email });
 
     if (isUserExist) {
       throw ApiError.BadRequestError(`User with email ${email} already exists`);
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
     const activationLink = v4();
 
-    const user = new User({ email, password: hashedPassword, activationLink });
-    await user.save();
+    await userService.createUser({ email, password, activationLink });
 
     await mailService.sendActivationLink(email, activationLink);
   }
 
   async login({ email, password }: Payload): Promise<LoginResponse | Error> {
-    const user = await User.findOne({ email });
+    const user = await userService.fetchUser({ email });
     if (!user) {
       throw ApiError.NotFoundError(`User with email ${email} does not exist`);
     }
@@ -73,14 +71,13 @@ class AuthService {
   }
 
   async activate(link: string) {
-    const user = await User.findOne({ activationLink: link });
+    const user = await userService.fetchUser({ activationLink: link });
 
     if (!user) {
       throw ApiError.BadRequestError("Such user does not exist");
     }
 
-    user.isActivated = true;
-    await user.save();
+    await userService.activateUser(user);
   }
 
   async refresh(token: string) {
@@ -95,7 +92,9 @@ class AuthService {
       throw ApiError.UnauthorizedError();
     }
 
-    const user = await User.findById((tokenData as JwtPayload).id);
+    const user = await userService.fetchUser({
+      id: (tokenData as JwtPayload).id,
+    });
 
     if (!user) {
       throw ApiError.UnauthorizedError();
